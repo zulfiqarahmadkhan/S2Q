@@ -1,4 +1,4 @@
-# Required — S2L does not start without these.
+# Required — S2Q does not start without these.
 # Install PyTorch first with:  python install_torch.py   (picks the GPU build for your driver)
 numpy>=1.24.0,<2.1
 matplotlib>=3.7.0
