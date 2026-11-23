@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# Environments
+.venv/
+venv/
+env/
+.conda/
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# S2Q results and data (keep images, masks and trained models out of the repository)
+output/
+results/
+SummarySheet/
+*_cp_masks.tif
+*_cp_masks.tiff
+*_cp_masks.png
+*_cp_masks.xlsx
+*_ROI.png
+*_intensities.xlsx
+*_intensities.csv
+run_settings_*.json
+models/
+my_model/
+*.pth
+*.npy
+
+# Installers: better attached to a GitHub Release than kept in the code history.
+# Remove the "#" below to stop uploading them with the code.
+# S2Q_Setup.exe
+# S2Q_mac.zip
+
+# Claude Code local settings
+.claude/settings.local.json

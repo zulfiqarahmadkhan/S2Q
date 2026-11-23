@@ -1,0 +1,14 @@
+# Optional — S2Q runs without these; the features that need them say so.
+# StarDist segmentation / training (TensorFlow has no wheels for some systems, e.g. older Intel Macs)
+stardist
+numba>=0.57.0
+tensorflow
+# Microscopy formats in the correction editor: ND2, LIF, CZI, LSM, OME-TIFF, OME-Zarr
+# (LSM and OME-TIFF also work without these)
+bioio
+bioio-nd2
+bioio-lif
+bioio-czi
+bioio-ome-tiff
+bioio-ome-zarr
+bioio-tifffile
