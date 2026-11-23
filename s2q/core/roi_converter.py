@@ -59,11 +59,11 @@ class ROIVisualizer:
 
     def save_rois_to_excel(self):
         """Compute ROI stats and write to Excel. Generates overlay plot if path was given."""
-        from skimage.io import imread
 
         try:
-            label_img = imread(self.label_image_path)
-            orig_img = self.image if self.image is not None else imread(self.original_image_path)
+            from s2q.core.image_files import read_image
+            label_img = read_image(self.label_image_path)
+            orig_img = self.image if self.image is not None else read_image(self.original_image_path)
         except Exception as e:
             raise ValueError(f"Unable to load image(s): {e}") from e
 

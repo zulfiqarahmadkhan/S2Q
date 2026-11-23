@@ -45,7 +45,9 @@ Pick an image (or **Choose image…**) and press **Open editor**. The mask is fo
 - **Images without masks:** a folder of images that have no masks yet also works. Its images are listed as **"(no mask yet)"**, and opening one starts an empty mask to draw on. That mask is saved in the mask folder.
 - **Open a specific pair — or a whole folder:** open any image (**File…**); leave the mask empty to start a new one. Or press **Folder…** to pick a folder of images: the editor opens with all of them, and ◀ Previous / Next ▶ walks through them. The mask field can be a mask file or a **folder of masks**, matched to the images by file name; images without a mask start with an empty one, saved in that mask folder (or next to the images when none is given).
 
-**Microscopy files.** Besides TIFF, PNG and JPG, the editor opens:
+**Image formats.** The editor opens TIFF (`.tif` and `.tiff`, including Fiji / ImageJ stacks and hyperstacks: the first time point is shown, Z-stacks as a maximum projection, channels kept), PNG, JPEG, BMP, GIF (first frame), WebP, JPEG 2000 and PGM / PPM / PNM. Masks can be TIFF or PNG (as Cellpose saves them, `name_cp_masks.png`); when a mask exists in both, the TIFF is used.
+
+**Microscopy files.** Besides these, the editor opens:
 - ND2, LIF, CZI and LSM files;
 - OME-TIFF;
 - OME-Zarr: use **Zarr folder…**, because these images are folders.
@@ -80,6 +82,7 @@ Draw a line with the Line profile tool and a separate window opens, with:
   - **Shade cells:** grey bands where the line crosses cells of the mask.
   - **Legend:** inside the plot, outside on the right, below the plot (never covers the curves), or off.
   - **Channels:** untick a channel to hide its curve when curves overlap. The table and the CSV still contain all channels.
+  - **Layers:** which image layers are profiled, next to Channels. With **Follow shown layers** ticked (the default) the profile uses the image layers ticked in the Layers list of the editor: untick layer 1 and tick another image, and the plot changes to that image; tick both and both are plotted (curves named `1 · …`, `3 · …`, each layer with its own line style). Tick layers here to choose them yourself; tick *Follow shown layers* again to go back. Moved layers are profiled where they are shown. The grey cell bands come from the edited mask when it is shown, otherwise from the top-most shown mask layer.
 - **Table:** mean, min, max and **integrated intensity** for each channel. The integrated intensity is the sum of all pixel values inside the line; with a wider line it includes all pixels of the band.
 - **Distance:** in µm when the file records the pixel size, otherwise in pixels.
 - **Export:**
@@ -122,7 +125,7 @@ Other controls:
   - **📊 Measure mask on images…:** lays one mask (the edited mask or a mask layer) on layer 1 and the image layers you tick, and gives each cell's area, centre, mean and integrated intensity (sum of the original pixel values) in every image and channel. With **Subtract background** on, the median outside all cells is also removed (integrated − area × background, i.e. CTCF). The **Summary** tab totals each image / channel. **Save Excel…** writes the sheets *Per cell*, *Summary* and *Info* (full file names and settings); **Save CSV** writes the per-cell table. Typical use: segment the cells in one channel, then add the other channels or time points as layers and measure the same cells there.
 - **Grow / shrink cells** (Tools group): set the pixels, then **⊕ Grow** or **⊖ Shrink**. Growing only uses background pixels, so neighbouring cells never merge (they meet half-way); shrinking removes pixels from each cell's edge. With an area selected only the cells in the area change. Ctrl+Z undoes it.
 - **Clean-up:** remove small cells or cells touching the border.
-- **Window and side panel:** the window has normal minimise / maximise buttons. **⛶ Full screen** (F11) fills the whole screen; F11 or Esc goes back. **□ Maximise** maximises or restores the window. **Side panel size S / M / L** sets the width of the right-hand panel; you can also drag the divider between the image and the panel. **⇥** (or Ctrl+B) hides the panel and Ctrl+B brings it back. The width is remembered.
+- **Window and side panel:** the window has normal minimise / maximise buttons. **⛶ Full screen** (F11) fills the whole screen; F11 or Esc goes back. **□ Maximise** maximises or restores the window. **Side panel size S / M / L** sets the width of the right-hand panel; you can also drag the divider between the image and the panel. **⇥** (or Ctrl+B) hides the panel; the **◀ Show panel** button at the top right of the image (or Ctrl+B) brings it back. The window always opens with the panel shown. The width is remembered.
 - **Pixel size (pixel → µm):** tick **Show sizes in micrometres (µm)** and set **1 pixel = … µm**. When the image file records its pixel size (ImageJ-calibrated or OME-TIFF, microscopy files), it is filled in for you; **From file** restores that value. **From line…** calibrates from a line drawn with the Line tool over a scale bar or anything of known length: type its length in µm. With the box ticked, the cell info, the area of interest and the line profile show µm. The Excel sheet gets extra columns (Area µm², Perimeter, Feret's diameter, major and minor axis, centroid X/Y in µm, and the pixel size), and **Measure mask on images** adds Area (µm²) and the centre in µm. The pixel columns stay as they are. The value is remembered for next time.
 - **Saving:** **Ctrl+S** saves in place. **◀ Previous / Next** moves through the folder and saves automatically. After saving, the image's Excel sheet is measured again. **Save as…** writes the mask, its Excel sheet and its ROI picture in the folder you choose. The Excel sheet measures the image you are showing: layer 1 when it is ticked, otherwise the top-most ticked image layer (so untick layer 1 and tick another image to measure the same cells there).
 
@@ -166,7 +169,8 @@ Browse a folder of images and masks as thumbnails (tick **Include subfolders** t
 
 ## Plotting
 
-- **Distributions (one sheet):** histograms and scatter plots of one Excel sheet. A summary sheet gives one bar per image.
+The Plotting page has two tabs: **Compare groups** and **SRPlots**.
+
 - **Compare groups:** load a results folder, then choose a measurement and group by well, stage, channel, type, image or **condition**. Name conditions like `A6,A7=WT; A8-A10=mutant`.
   - **Plots:** box or violin.
   - **Tests:** Mann-Whitney, Welch t-test or Kruskal-Wallis, with corrected pairwise tests.
@@ -174,7 +178,6 @@ Browse a folder of images and masks as thumbnails (tick **Include subfolders** t
     - *Cells* treats every cell as a sample;
     - *Image means* uses one value per image, which is more honest when there are several images per group.
   - **Export table (CSV).**
-- **Explore cells:** any measurement against any other, coloured by group, with optional log scales. Hover a point to see the cell; click it to open that cell in the correction editor.
 
 **Save plot…** always saves on a white background (PNG, SVG or PDF), whatever the app theme.
 

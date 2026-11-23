@@ -34,6 +34,7 @@ class LineProfileWindow(QWidget):
     """Plot + table of a line profile. Emits ``width_changed`` when the line width is changed."""
     width_changed = pyqtSignal(int)
     clear_requested = pyqtSignal()
+    layers_changed = pyqtSignal()          # the user ticked / unticked a layer (or "Follow shown layers")
 
     def __init__(self, parent=None):
         super().__init__(parent, Qt.WindowType.Window)
@@ -42,6 +43,8 @@ class LineProfileWindow(QWidget):
         themed_window(self)
         self._result = None
         self._source = ""
+        self._colours: dict[str, str] = {}
+        self._layer_checks: dict[str, QCheckBox] = {}
 
         from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
         from matplotlib.figure import Figure
@@ -87,7 +90,31 @@ class LineProfileWindow(QWidget):
         self._chan_box = QHBoxLayout()
         self._chan_box.setSpacing(8)
         row2.addLayout(self._chan_box)
-        row2.addStretch()
+        row2.addSpacing(16)
+        lay_lbl = QLabel("Layers")
+        lay_lbl.setToolTip("Which image layers of the correction window are profiled")
+        row2.addWidget(lay_lbl)
+        # many layers (e.g. every time point) scroll sideways instead of widening the window
+        lay_host = QWidget()
+        self._layer_box = QHBoxLayout(lay_host)
+        self._layer_box.setContentsMargins(0, 0, 0, 0)
+        self._layer_box.setSpacing(8)
+        self._layer_box.addStretch()
+        lay_scroll = QScrollArea()
+        lay_scroll.setWidget(lay_host)
+        lay_scroll.setWidgetResizable(True)
+        lay_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        lay_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        lay_scroll.setFixedHeight(lay_host.sizeHint().height() + 22)
+        lay_scroll.setMinimumWidth(160)
+        lay_scroll.setStyleSheet("QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; }")
+        row2.addWidget(lay_scroll, 1)
+        self.follow_chk = QCheckBox("Follow shown layers")
+        self.follow_chk.setChecked(True)
+        self.follow_chk.setToolTip("Profile the image layers that are ticked (shown) in the correction window; "
+                                   "tick layers here to choose them yourself")
+        self.follow_chk.toggled.connect(lambda _: self.layers_changed.emit())
+        row2.addWidget(self.follow_chk)
         root.addLayout(row2)
         self._chan_checks: dict[str, QCheckBox] = {}
 
@@ -147,6 +174,7 @@ class LineProfileWindow(QWidget):
         self.info.setText(f"{source}\nLine length {r['length']:.1f} {r['unit']} · width {r['width']} px · "
                           f"{n} points · {len(r['channels'])} channel(s). Integrated intensity = sum of all "
                           f"pixel values inside the line.")
+        self._colours = self._channel_colours(r["channels"])
         self.table.setRowCount(len(r["channels"]))
         for row, ch in enumerate(r["channels"]):
             vals = [ch["name"], f"{ch['mean']:.4g}", f"{ch['min']:.4g}", f"{ch['max']:.4g}",
@@ -156,9 +184,64 @@ class LineProfileWindow(QWidget):
         self._sync_channel_checks([c["name"] for c in r["channels"]])
         self._draw()
 
+    @staticmethod
+    def _channel_colours(channels) -> dict:
+        """A distinct colour per curve: red / green / blue channels keep their colour where possible."""
+        out, used = {}, set()
+        for i, ch in enumerate(channels):
+            col = channel_colour(ch["name"], i)
+            if col in used:
+                col = next((c for c in _PALETTE if c not in used), col)
+            used.add(col)
+            out[ch["name"]] = col
+        return out
+
+    def clear_result(self, message: str):
+        self._result = None
+        self.info.setText(message)
+        self.table.setRowCount(0)
+        self._draw()
+
+    # ── layers ────────────────────────────────────────────────────────────
+
+    def set_layers(self, options: list, shown: set):
+        """*options*: [(key, label)] of the image layers; *shown*: keys ticked in the correction window."""
+        keys = [k for k, _ in options]
+        if keys != list(self._layer_checks) or any(cb.text() != lab for (k, lab), cb in
+                                                     zip(options, self._layer_checks.values())):
+            old = {k: cb.isChecked() for k, cb in self._layer_checks.items()}
+            for cb in self._layer_checks.values():
+                self._layer_box.removeWidget(cb)
+                cb.deleteLater()
+            self._layer_checks = {}
+            for k, label in options:
+                cb = QCheckBox(label)
+                cb.setChecked(old.get(k, k in shown))
+                cb.setToolTip(label)
+                cb.toggled.connect(self._on_layer_ticked)
+                self._layer_box.insertWidget(self._layer_box.count() - 1, cb)   # before the stretch
+                self._layer_checks[k] = cb
+        if self.follow_chk.isChecked():
+            for k, cb in self._layer_checks.items():
+                cb.blockSignals(True)
+                cb.setChecked(k in shown)
+                cb.blockSignals(False)
+
+    def _on_layer_ticked(self, _=None):
+        self.follow_chk.blockSignals(True)
+        self.follow_chk.setChecked(False)          # chosen by hand from now on
+        self.follow_chk.blockSignals(False)
+        self.layers_changed.emit()
+
+    def selected_layers(self) -> list:
+        return [k for k, cb in self._layer_checks.items() if cb.isChecked()]
+
     def _sync_channel_checks(self, names: list[str]):
         """One tick box per channel; ticks are kept when the line or the time point changes."""
         if list(self._chan_checks) == names:
+            for i, (name, cb) in enumerate(self._chan_checks.items()):
+                cb.setStyleSheet(f"QCheckBox {{ color: {self._colours.get(name, channel_colour(name, i))}; "
+                                 f"font-weight: 600; }}")
             return
         old = {k: cb.isChecked() for k, cb in self._chan_checks.items()}
         for cb in self._chan_checks.values():
@@ -168,10 +251,12 @@ class LineProfileWindow(QWidget):
         for i, name in enumerate(names):
             cb = QCheckBox(name)
             cb.setChecked(old.get(name, True))
-            cb.setStyleSheet(f"QCheckBox {{ color: {channel_colour(name, i)}; font-weight: 600; }}")
             cb.toggled.connect(lambda _: self._draw())
             self._chan_box.addWidget(cb)
             self._chan_checks[name] = cb
+        for i, (name, cb) in enumerate(self._chan_checks.items()):
+            cb.setStyleSheet(f"QCheckBox {{ color: {self._colours.get(name, channel_colour(name, i))}; "
+                             f"font-weight: 600; }}")
 
     def _resize_plot(self, *_):
         w, h = self.plot_w.value(), self.plot_h.value()
@@ -208,7 +293,8 @@ class LineProfileWindow(QWidget):
                 if self.norm_chk.isChecked():
                     lo, hi = float(np.min(y)), float(np.max(y))
                     y = (y - lo) / (hi - lo) if hi > lo else y * 0
-                ax.plot(d, y, color=channel_colour(ch["name"], i), lw=1.8, label=ch["name"])
+                ax.plot(d, y, color=self._colours.get(ch["name"], channel_colour(ch["name"], i)), lw=1.8,
+                        ls=["-", "--", ":", "-."][ch.get("layer", 0) % 4], label=ch["name"])
             ax.set_xlabel(f"Distance along the line ({r['unit']})")
             ax.set_ylabel("Normalised intensity" if self.norm_chk.isChecked() else "Intensity (mean across the line width)")
             ax.set_xlim(d[0], d[-1] if len(d) > 1 else 1)

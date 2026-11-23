@@ -25,7 +25,7 @@ from s2q.ui.widgets import remember_text, variant
 
 logger = logging.getLogger(__name__)
 
-IMAGE_EXTENSIONS = {".tif", ".tiff", ".png", ".jpg", ".jpeg", ".bmp", ".gif"}
+from s2q.core.image_files import IMAGE_EXTENSIONS  # noqa: E402  (one list for the whole app)
 THUMB_SIZE = 140
 THUMB_PADDING = 6
 

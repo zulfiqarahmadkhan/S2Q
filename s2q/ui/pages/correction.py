@@ -84,7 +84,7 @@ class CorrectionPage(QWidget):
         # ── card: folders ─────────────────────────────────────────────────
         src_lay = QVBoxLayout()
         src_lay.addLayout(section_header(
-            "Folders", f"Where the masks (*{MASK_SUFFIX}.tif) are and where the images are. A folder of images without masks works too (TIFF, PNG, ND2, LIF, CZI, LSM, OME-TIFF)."))
+            "Folders", f"Where the masks (*{MASK_SUFFIX}.tif) are and where the images are. A folder of images without masks works too (TIFF, PNG, JPEG, BMP, GIF, WebP, JPEG 2000, ND2, LIF, CZI, LSM, OME-TIFF)."))
         src_lay.addSpacing(4)
         self.mask_dir_edit = QLineEdit()
         self.mask_dir_edit.setPlaceholderText("Folder with masks — or with images (new masks are saved here)…")
@@ -217,11 +217,12 @@ class CorrectionPage(QWidget):
 
     def _ask_image(self, mask_path: str, start_dir: str = "") -> str | None:
         from s2q.core.microscopy import FILE_FILTER
+        from s2q.core.image_files import IMAGE_PATTERNS
         start = start_dir or self.orig_dir_edit.text().strip() or str(Path(mask_path).parent)
         image_path, _ = QFileDialog.getOpenFileName(
             self, f"Select the original image for {Path(mask_path).name}", start,
-            f"All images (*.tif *.tiff *.png *.jpg *.jpeg *.bmp *.nd2 *.lif *.czi *.lsm);;"
-            f"Images (*.tif *.tiff *.png *.jpg *.jpeg *.bmp);;{FILE_FILTER};;All (*)")
+            f"All images ({IMAGE_PATTERNS} *.nd2 *.lif *.czi *.lsm);;"
+            f"Images ({IMAGE_PATTERNS});;{FILE_FILTER};;All (*)")
         if not image_path:
             return None
         if is_derived(image_path):
@@ -233,11 +234,13 @@ class CorrectionPage(QWidget):
         return image_path
 
     def _pick_pair_mask(self):
+        from s2q.core.image_files import IMAGE_PATTERNS
         p, _ = QFileDialog.getOpenFileName(
-            self, "Select mask file", self.mask_dir_edit.text().strip(), "TIFF (*.tif *.tiff);;All (*)")
+            self, "Select mask file", self.mask_dir_edit.text().strip(),
+            f"Masks (*.tif *.tiff *.png);;All images ({IMAGE_PATTERNS});;All (*)")
         if p:
             self.pair_mask_edit.setText(p)
-            guess = self._match(self._originals(), p) if p.endswith(f"{MASK_SUFFIX}.tif") else None
+            guess = self._match(self._originals(), p) if Path(p).stem.endswith(MASK_SUFFIX) else None
             if guess and not self.pair_image_edit.text().strip():
                 self.pair_image_edit.setText(guess)
 

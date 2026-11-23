@@ -49,9 +49,8 @@ def read_raw(path, plane=None) -> np.ndarray:
     from s2q.core.microscopy import is_microscopy, read_plane
     if is_microscopy(path):
         return read_plane(path, plane)
-    from skimage.io import imread
-    from s2q.core.image_files import channels_last
-    return channels_last(imread(str(path)))
+    from s2q.core.image_files import read_image
+    return read_image(path)
 
 
 def image_channels(path, plane=None) -> list:
@@ -105,10 +104,10 @@ def normalise_image(img: np.ndarray, max_side: int | None = None) -> np.ndarray:
 
 def load_mask(path, shape=None) -> np.ndarray:
     """Label image; an empty mask of *shape* if the file does not exist yet (a new mask)."""
-    from skimage.io import imread
+    from s2q.core.image_files import read_image
     if shape is not None and not Path(path).exists():
         return np.zeros(shape[:2], dtype=np.int32)
-    mask = imread(str(path))
+    mask = read_image(path)
     if mask.ndim == 3:
         mask = mask[:, :, 0]
     return mask.astype(np.int32)
@@ -823,6 +822,7 @@ class ManualCorrectionDialog(QDialog):
         self._line = None                   # ((x0, y0), (x1, y1)) of the line profile
         self._profile_win = None
         self._prof_cache = (None, None)     # (key, channels) of the image being profiled
+        self._layer_prof_cache: dict = {}   # (path, plane, offset) -> channels of an image layer
         self._compare: _CompareWindow | None = None
         self._measure_layers_win = None
         self._px_file = None                # µm per pixel recorded in the image file, or None
@@ -937,6 +937,16 @@ class ManualCorrectionDialog(QDialog):
         self._scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._scroll.setObjectName("ImageCanvas")
         self._toast = _Toast(self._scroll.viewport())
+        # shown over the image's top-right corner while the side panel is hidden
+        self._show_panel_btn = QPushButton("◀ Show panel", self._scroll)
+        self._show_panel_btn.setToolTip("Bring the side panel back (Ctrl+B)")
+        self._show_panel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._show_panel_btn.setStyleSheet(
+            "QPushButton { background: rgba(20, 20, 26, 210); color: white; border: 1px solid #888; "
+            "border-radius: 6px; padding: 6px 12px; font-weight: 600; }"
+            "QPushButton:hover { background: rgba(60, 60, 80, 230); }")
+        self._show_panel_btn.clicked.connect(lambda: self._set_panel_width(self._last_panel_width or 380))
+        self._show_panel_btn.hide()
 
         panel = QWidget()
         panel.setObjectName("SideBar")
@@ -979,7 +989,7 @@ class ManualCorrectionDialog(QDialog):
         hide_btn = QPushButton("⇥")
         hide_btn.setProperty("variant", "small")
         hide_btn.setFixedWidth(30)
-        hide_btn.setToolTip("Hide the side panel (Ctrl+B shows / hides it)")
+        hide_btn.setToolTip("Hide the side panel — “◀ Show panel” (top right of the image) or Ctrl+B brings it back")
         hide_btn.clicked.connect(lambda: self._set_panel_width(0))
         win_row.addWidget(hide_btn)
         win_row.addStretch(1)
@@ -1434,6 +1444,8 @@ class ManualCorrectionDialog(QDialog):
         root.addWidget(self._splitter, 1)
         from s2q.ui.widgets import settings
         self._panel_width = max(0, settings().value("correction/panel_width", 380, type=int))
+        if self._panel_width < 200:
+            self._panel_width = 380          # always open with the panel visible
         self._last_panel_width = self._panel_width or 380
         QTimer.singleShot(0, lambda: self._set_panel_width(self._panel_width, remember=False))
         self._set_tool("pencil")
@@ -1448,8 +1460,25 @@ class ManualCorrectionDialog(QDialog):
             self._last_panel_width = width
         if remember:
             self._remember_panel_width()
+        self._place_show_panel_btn()
+
+    def _place_show_panel_btn(self):
+        """The “◀ Show panel” button: visible only while the side panel is hidden."""
+        if not hasattr(self, "_show_panel_btn"):
+            return
+        sizes = self._splitter.sizes()
+        hidden = len(sizes) == 2 and sizes[1] == 0
+        b = self._show_panel_btn
+        if hidden:
+            b.adjustSize()
+            sb = self._scroll.verticalScrollBar()
+            right = self._scroll.width() - (sb.width() if sb.isVisible() else 0) - 12
+            b.move(max(4, right - b.width()), 12)
+            b.raise_()
+        b.setVisible(hidden)
 
     def _remember_panel_width(self):
+        self._place_show_panel_btn()
         sizes = self._splitter.sizes()
         if len(sizes) == 2:
             self._panel_width = sizes[1]
@@ -1504,6 +1533,8 @@ class ManualCorrectionDialog(QDialog):
     # ── keyboard: Space pans while held ───────────────────────────────────
 
     def eventFilter(self, obj, ev):
+        if ev.type() == QEvent.Type.Resize and obj is getattr(self, "_scroll", None):
+            QTimer.singleShot(0, self._place_show_panel_btn)
         if ev.type() in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease) and self.isActiveWindow():
             if ev.key() == Qt.Key.Key_Space and not ev.isAutoRepeat():
                 down = ev.type() == QEvent.Type.KeyPress
@@ -1988,6 +2019,14 @@ class ManualCorrectionDialog(QDialog):
         self._refresh_display()
         self._canvas.refresh()
         self._schedule_compare()
+        # the line profile follows the layers (ticked, moved, added, removed)
+        if self._profile_win is not None and self._profile_win.isVisible():
+            if not hasattr(self, "_profile_timer"):
+                self._profile_timer = QTimer(self)
+                self._profile_timer.setSingleShot(True)
+                self._profile_timer.setInterval(120)
+                self._profile_timer.timeout.connect(self._update_profile)
+            self._profile_timer.start()
 
     def _refresh_display(self):
         """Rebuild the uint8 RGB display image from the raw channels (+ image layers)."""
@@ -2154,16 +2193,35 @@ class ManualCorrectionDialog(QDialog):
             self._profile_win = LineProfileWindow(self)
             self._profile_win.width_changed.connect(self._on_profile_width)
             self._profile_win.clear_requested.connect(self._clear_line)
+            self._profile_win.layers_changed.connect(self._update_profile)
             self._profile_win.width_spin.setValue(self._canvas.line_width)
         if open_window:
             self._profile_win.show()
             self._profile_win.raise_()
+        sources = self._profile_sources()
+        shown = {k for k, _, on, _ in sources if on}
+        if not shown:
+            shown = {"base"}                      # nothing shown: profile the opened image
+        self._profile_win.set_layers([(k, lab) for k, lab, _, _ in sources], shown)
         if self._line is None or not self._profile_win.isVisible():
             return
+        chosen = [s for s in sources if s[0] in set(self._profile_win.selected_layers())]
         try:
-            chans = self._profile_channels()
+            chans, layer_of = [], []
+            for n, (key, label, _, get) in enumerate(chosen):
+                for name, arr in get():
+                    num = label.split(" ·")[0]
+                    chans.append((f"{num} · {name}" if len(chosen) > 1 else name, arr))
+                    layer_of.append(n)
+            labels, mask_name = self._profile_labels()
             px = self._pixel_size()
-            res = line_profile(chans, *self._line, width=self._canvas.line_width, labels=self._mask, pixel_size=px)
+            if chans:
+                res = line_profile(chans, *self._line, width=self._canvas.line_width, labels=labels,
+                                   pixel_size=px)
+                for ch, n in zip(res["channels"], layer_of):
+                    ch["layer"] = n
+            else:
+                res = None
         except Exception as e:
             self._status(f"Line profile failed: {e}", "Error")
             return
@@ -2172,7 +2230,45 @@ class ManualCorrectionDialog(QDialog):
             plane = f" · time {self._plane.t + 1}" + (f" · Z {self._plane.z + 1}" if self._plane.z >= 0 else
                                                        (" · max projection" if self._minfo.Z > 1 else ""))
         (x0, y0), (x1, y1) = self._line
-        self._profile_win.set_result(res, f"Image: {self._img_path.name}{plane} · from ({x0}, {y0}) to ({x1}, {y1})")
+        if res is None:
+            self._profile_win.clear_result("Tick at least one layer next to “Layers”.")
+            return
+        names = ", ".join(lab for _, lab, _, _ in chosen)
+        self._profile_win.set_result(
+            res, f"Image: {self._img_path.name}{plane} · from ({x0}, {y0}) to ({x1}, {y1})\n"
+                 f"Layers profiled: {names} · cells shaded from: {mask_name}")
+
+    def _profile_sources(self) -> list:
+        """[(key, label, shown in the correction window, callable → [(channel, array)])] of the image layers."""
+        out = [("base", f"1 · {self._img_path.name}", self._base_visible, self._profile_channels)]
+        for n, lay in enumerate(self._layers, start=self._BASE_ROWS + 1):
+            if lay.kind == "image" and lay.path:
+                moved = f" (moved {lay.offset[0]:+d}, {lay.offset[1]:+d})" if lay.offset != (0, 0) else ""
+                out.append((f"layer{id(lay)}", f"{n} · {lay.name}{moved}", lay.visible,
+                            lambda l=lay: self._layer_channels(l)))
+        return out
+
+    def _layer_channels(self, lay) -> list:
+        """Channels (original values) of an image layer, moved like it is shown."""
+        p = lay.plane
+        key = (lay.path, None if p is None else (p.scene, p.t, p.z), lay.offset)
+        if key not in self._layer_prof_cache:
+            if len(self._layer_prof_cache) > 8:
+                self._layer_prof_cache.clear()
+            self._layer_prof_cache[key] = [(c, shift_array(a, *lay.offset))
+                                           for c, a in image_channels(lay.path, lay.plane)]
+        return self._layer_prof_cache[key]
+
+    def _profile_labels(self):
+        """(cell labels for the shaded bands, their name): the edited mask when it is shown, otherwise
+        the top-most shown mask layer, otherwise none."""
+        if self._mask_visible:
+            return self._mask, "2 · mask being edited"
+        for n in range(len(self._layers) - 1, -1, -1):
+            lay = self._layers[n]
+            if lay.kind == "mask" and lay.visible:
+                return lay.data, f"{n + self._BASE_ROWS + 1} · {lay.name}"
+        return None, "no mask shown"
 
     def _on_profile_width(self, w: int):
         self._canvas.line_width = w
@@ -2265,7 +2361,13 @@ class ManualCorrectionDialog(QDialog):
 
     def _image_filter(self) -> str:
         from s2q.core.microscopy import FILE_FILTER
-        return f"Images (*.tif *.tiff *.png *.jpg *.jpeg *.bmp);;{FILE_FILTER};;All (*)"
+        from s2q.core.image_files import IMAGE_PATTERNS
+        return f"Images ({IMAGE_PATTERNS});;{FILE_FILTER};;All (*)"
+
+    @staticmethod
+    def _mask_filter() -> str:
+        from s2q.core.image_files import IMAGE_PATTERNS
+        return f"Masks (*.tif *.tiff *.png);;All images ({IMAGE_PATTERNS});;All (*)"
 
     def _add_image_layer(self):
         path, _ = QFileDialog.getOpenFileName(self, "Image to add as a layer (same size, e.g. another channel)",
@@ -2275,7 +2377,7 @@ class ManualCorrectionDialog(QDialog):
 
     def _add_mask_layer(self):
         path, _ = QFileDialog.getOpenFileName(self, "Mask to add as a layer (same size)",
-                                              str(self._mask_path.parent), "TIFF (*.tif *.tiff);;All (*)")
+                                              str(self._mask_path.parent), self._mask_filter())
         if path:
             self._add_layer_from_file(path, "mask")
 

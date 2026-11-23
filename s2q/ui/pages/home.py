@@ -20,7 +20,7 @@ ACTIONS = [
     ("viewer", "🖼", "View a dataset",
      "Browse a folder of images and masks with thumbnails and a zoomable preview."),
     ("plotting", "📊", "Plot results",
-     "Distributions and comparisons from per-image sheets or the summary sheet."),
+     "Compare groups of cells, or make any of 126 plot types (SRPlots)."),
     ("tools", "🛠", "Tools",
      "Image enhancer (denoise, contrast, background), Cellpose GUI, checks."),
 ]
